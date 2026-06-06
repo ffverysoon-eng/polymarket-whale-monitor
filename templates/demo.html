@@ -1,0 +1,433 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Demo Portfolio — Whale Follow</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --bg:      #0d0f14;
+      --surface: #161a24;
+      --border:  #252b3b;
+      --text:    #e2e8f0;
+      --muted:   #64748b;
+      --accent:  #6366f1;
+      --green:   #22c55e;
+      --red:     #ef4444;
+      --yellow:  #f59e0b;
+      --card:    #1a1f2e;
+    }
+    html, body { height: 100%; font-family: system-ui, sans-serif;
+                 background: var(--bg); color: var(--text); font-size: 14px; }
+
+    /* Topbar */
+    .topbar { display: flex; align-items: center; justify-content: space-between;
+              padding: 0 20px; height: 52px; background: var(--surface);
+              border-bottom: 1px solid var(--border); }
+    .logo { font-weight: 700; font-size: 15px; }
+    .logo span { color: var(--accent); }
+    .topbar-right { display: flex; align-items: center; gap: 10px; }
+    .btn { padding: 5px 14px; border-radius: 6px; border: none; cursor: pointer;
+           font-size: 12px; font-weight: 600; }
+    .btn-primary { background: var(--accent); color: #fff; }
+    .btn-danger  { background: rgba(239,68,68,.15); color: var(--red); border: 1px solid rgba(239,68,68,.3); }
+    .btn-muted   { background: var(--border); color: var(--muted); }
+    a.nav-link   { color: var(--muted); font-size: 12px; text-decoration: none; }
+    a.nav-link:hover { color: var(--text); }
+
+    /* Layout */
+    .page { padding: 20px 24px; max-width: 1600px; margin: 0 auto; }
+
+    /* Stats row */
+    .accounts-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 24px; }
+    .acct-card { background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 16px 20px; }
+    .acct-title { font-size: 11px; text-transform: uppercase; letter-spacing: .8px;
+                  color: var(--muted); margin-bottom: 12px; display: flex; align-items: center; gap: 8px; }
+    .acct-badge { background: var(--accent); color: #fff; padding: 1px 7px; border-radius: 8px;
+                  font-size: 10px; font-weight: 700; }
+    .acct-badge-b { background: rgba(245,158,11,.2); color: var(--yellow); }
+    .stats-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-bottom: 14px; }
+    .stat-box { background: var(--bg); border-radius: 6px; padding: 8px 10px; }
+    .stat-label { font-size: 10px; color: var(--muted); margin-bottom: 2px; }
+    .stat-val   { font-size: 16px; font-weight: 700; }
+    .stat-sub   { font-size: 11px; color: var(--muted); margin-top: 1px; }
+    .pos { color: var(--green); }
+    .neg { color: var(--red); }
+    .neu { color: var(--text); }
+
+    /* Chart */
+    .chart-wrap { position: relative; height: 180px; }
+
+    /* Timeframe buttons */
+    .tf-row { display: flex; gap: 6px; margin-bottom: 8px; }
+    .tf-btn { padding: 2px 10px; border-radius: 4px; border: 1px solid var(--border);
+              background: transparent; color: var(--muted); font-size: 11px; cursor: pointer; }
+    .tf-btn.active { background: var(--accent); color: #fff; border-color: var(--accent); }
+
+    /* Trade log */
+    .section-title { font-size: 13px; font-weight: 700; border-bottom: 1px solid var(--border);
+                     padding-bottom: 6px; margin-bottom: 12px; display: flex; align-items: center; gap: 8px; }
+    .trade-table { width: 100%; border-collapse: collapse; font-size: 11px; }
+    .trade-table th { color: var(--muted); text-align: left; padding: 4px 8px;
+                      border-bottom: 1px solid var(--border); font-weight: 500; white-space: nowrap; }
+    .trade-table td { padding: 6px 8px; border-bottom: 1px solid #1c2030; vertical-align: middle; }
+    .trade-table tr:last-child td { border-bottom: none; }
+    .badge { padding: 1px 7px; border-radius: 4px; font-weight: 700; font-size: 10px; }
+    .badge-won    { background: rgba(34,197,94,.15);  color: var(--green); }
+    .badge-lost   { background: rgba(239,68,68,.15);  color: var(--red); }
+    .badge-open   { background: rgba(99,102,241,.15); color: #818cf8; }
+    .badge-early  { background: rgba(245,158,11,.15); color: var(--yellow); }
+    .badge-stop   { background: rgba(239,68,68,.1);   color: #f87171; }
+
+    /* Tab switcher for trade log */
+    .tab-row { display: flex; gap: 4px; margin-bottom: 12px; border-bottom: 1px solid var(--border); }
+    .tab { padding: 6px 14px; font-size: 12px; cursor: pointer; color: var(--muted);
+           border-bottom: 2px solid transparent; margin-bottom: -1px; }
+    .tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+
+    /* Toast */
+    #toast { position: fixed; bottom: 20px; right: 20px; background: var(--surface);
+             border: 1px solid var(--border); padding: 9px 16px; border-radius: 7px;
+             font-size: 13px; opacity: 0; transition: opacity .25s; pointer-events: none; z-index: 999; }
+    #toast.show { opacity: 1; }
+
+    /* Dot */
+    .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); }
+    .dot.ok { background: var(--green); }
+    @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.3} }
+    .dot.running { background: var(--yellow); animation: pulse 1s infinite; }
+
+    /* Empty state */
+    .empty-row td { color: var(--muted); text-align: center; padding: 24px; }
+  </style>
+</head>
+<body>
+
+<header class="topbar">
+  <div class="logo">🐳 <span>Demo Portfolio</span> — Whale Follow Tracker</div>
+  <div class="topbar-right">
+    <div id="status-dot" class="dot {% if job.running %}running{% elif job.last_finished %}ok{% endif %}"></div>
+    <span style="font-size:12px;color:var(--muted)" id="status-txt">
+      {% if job.running %}Updating…{% elif job.last_finished %}Live · {{ job.last_finished }}{% else %}No data yet{% endif %}
+    </span>
+    <a href="/" class="nav-link btn btn-muted">← Main Dashboard</a>
+  </div>
+</header>
+
+<div class="page">
+
+  <!-- Strategy rationale -->
+  <div style="background:var(--card);border:1px solid var(--accent);border-radius:10px;padding:16px 20px;margin-bottom:20px">
+    <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px">
+      <span style="font-size:11px;text-transform:uppercase;letter-spacing:.8px;color:var(--accent);font-weight:700">💡 Account C — Smart Copy v2 Strategy</span>
+      <span style="font-size:10px;background:rgba(239,68,68,.15);color:var(--red);padding:1px 8px;border-radius:8px">v1 failed: sports timing lag + oversizing</span>
+      <span style="font-size:10px;background:rgba(34,197,94,.15);color:var(--green);padding:1px 8px;border-radius:8px">v2: no sports · Diamond Hands only · smaller stakes</span>
+    </div>
+    <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;font-size:12px">
+      <div>
+        <div style="color:var(--yellow);font-weight:600;margin-bottom:4px">🎯 Whale Filter</div>
+        <div style="color:var(--muted);line-height:1.6">
+          Top 10 rank · P&L ≥ $1M · <b style="color:var(--text)">Diamond Hands or Mixed Exit only</b> ·
+          Excludes Early Profit Takers (their edge is timing we can't replicate)
+        </div>
+      </div>
+      <div>
+        <div style="color:var(--yellow);font-weight:600;margin-bottom:4px">📊 Bet Filter</div>
+        <div style="color:var(--muted);line-height:1.6">
+          Price 0.15–0.60 · New bet ≥ $500 · Position scan ≥ $200 ·
+          <b style="color:var(--text)">Sports/esports/micro bets fully excluded</b> ·
+          Max 4 open per whale · <span style="color:var(--green)">📍 Also scans existing positions</span>
+        </div>
+      </div>
+      <div>
+        <div style="color:var(--yellow);font-weight:600;margin-bottom:4px">⚖️ Sizing</div>
+        <div style="color:var(--muted);line-height:1.6">
+          0.3–0.4% base (vs 1–1.5% in v1) ·
+          EV-adjusted near 50¢ · Hard cap 0.8% — survives long drawdown
+        </div>
+      </div>
+      <div>
+        <div style="color:var(--yellow);font-weight:600;margin-bottom:4px">🚪 Exit Rules</div>
+        <div style="color:var(--muted);line-height:1.6">
+          Follow whale exit + <b style="color:var(--text)">hard stop at −50%</b> (was −85%) ·
+          Diamond Hands: lock profit at 88¢ · Cut losers fast, let winners breathe
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Account cards + equity curves -->
+  <div class="accounts-grid" id="accounts-grid">
+    <!-- Populated by JS -->
+    <div class="acct-card" id="card-flat"></div>
+    <div class="acct-card" id="card-prop"></div>
+  </div>
+  <div class="acct-card" id="card-smart" style="margin-bottom:20px;border-color:var(--yellow)"></div>
+
+  <!-- Trade log -->
+  <div>
+    <div class="section-title">📋 Trade Log</div>
+    <div class="tab-row">
+      <div class="tab active" onclick="switchTab('all',this)">All</div>
+      <div class="tab" onclick="switchTab('open',this)">Open</div>
+      <div class="tab" onclick="switchTab('closed',this)">Closed</div>
+      <div class="tab" onclick="switchTab('flat',this)">Flat $1</div>
+      <div class="tab" onclick="switchTab('prop',this)">Prop %</div>
+      <div class="tab" onclick="switchTab('smart',this)" style="color:var(--yellow)">Smart C</div>
+    </div>
+    <table class="trade-table" id="trade-table">
+      <thead><tr>
+        <th>Account</th>
+        <th>Whale</th>
+        <th>Market</th>
+        <th>Outcome</th>
+        <th>Entry</th>
+        <th>Cur / Exit</th>
+        <th>Stake</th>
+        <th>P&amp;L</th>
+        <th>Status</th>
+        <th>Exit Style</th>
+        <th>Source</th>
+        <th>Entry Time</th>
+      </tr></thead>
+      <tbody id="trade-tbody"></tbody>
+    </table>
+  </div>
+</div>
+
+<div id="toast"></div>
+
+<script>
+let allData  = null;
+let curTab   = 'all';
+let charts   = {};
+let allSnaps = { flat: [], prop: [] };
+
+// ── Chart instances ─────────────────────────────────────────────────────────
+function buildChart(canvasId, snaps, label, color) {
+  const ctx = document.getElementById(canvasId).getContext('2d');
+  if (charts[canvasId]) charts[canvasId].destroy();
+  charts[canvasId] = new Chart(ctx, {
+    type: 'line',
+    data: {
+      labels:   snaps.map(s => s.dt),
+      datasets: [{
+        label,
+        data:        snaps.map(s => s.value),
+        borderColor: color,
+        backgroundColor: color.replace('rgb','rgba').replace(')',',0.08)'),
+        borderWidth: 2,
+        pointRadius: snaps.length < 30 ? 3 : 0,
+        pointHoverRadius: 4,
+        tension: 0.3,
+        fill: true,
+      }]
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { display: false },
+                 tooltip: { callbacks: {
+                   label: c => `$${c.parsed.y.toLocaleString(undefined,{maximumFractionDigits:2})}`
+                 }}},
+      scales: {
+        x: { display: false },
+        y: {
+          grid:  { color: 'rgba(255,255,255,0.04)' },
+          ticks: { color: '#64748b', font: { size: 10 },
+                   callback: v => '$' + v.toLocaleString(undefined,{maximumFractionDigits:0}) }
+        }
+      }
+    }
+  });
+}
+
+function filterSnaps(snaps, tf) {
+  if (!snaps.length) return snaps;
+  const now = snaps[snaps.length-1].ts;
+  const cutoffs = { '1h': 3600, '6h': 21600, '24h': 86400, '7d': 604800, 'all': Infinity };
+  const cut = now - (cutoffs[tf] || Infinity);
+  const filtered = snaps.filter(s => s.ts >= cut);
+  return filtered.length ? filtered : snaps;
+}
+
+// ── Render account card ─────────────────────────────────────────────────────
+function renderCard(key, d, el) {
+  const isFlat  = key === 'flat';
+  const isSmart = key === 'smart';
+  const pnlCls  = d.pnl >= 0 ? 'pos' : 'neg';
+  const pnlSign = d.pnl >= 0 ? '+' : '';
+  const sharpeColor = d.sharpe >= 1 ? 'var(--green)' : d.sharpe >= 0 ? 'var(--yellow)' : 'var(--red)';
+  const acctLabel = isFlat ? 'A' : isSmart ? 'C' : 'B';
+  const acctTitle = isFlat ? 'Flat Bet — $1 per trade'
+                  : isSmart ? 'Smart Copy — selective whale filter'
+                  : 'Proportional — mirrors whale sizing';
+  const badgeStyle = isSmart
+    ? 'background:rgba(245,158,11,.3);color:var(--yellow)'
+    : isFlat ? '' : '';
+
+  el.innerHTML = `
+    <div class="acct-title">
+      <span class="acct-badge ${isFlat ? '' : isSmart ? '' : 'acct-badge-b'}" style="${badgeStyle}">${acctLabel}</span>
+      ${acctTitle}
+    </div>
+    <div class="stats-grid">
+      <div class="stat-box">
+        <div class="stat-label">Portfolio Value</div>
+        <div class="stat-val neu">$${d.total_value.toLocaleString(undefined,{maximumFractionDigits:2})}</div>
+        <div class="stat-sub ${pnlCls}">${pnlSign}$${d.pnl.toLocaleString(undefined,{maximumFractionDigits:2})} (${pnlSign}${d.pnl_pct}%)</div>
+      </div>
+      <div class="stat-box">
+        <div class="stat-label">Win Rate</div>
+        <div class="stat-val ${d.win_rate >= 50 ? 'pos' : d.win_rate > 0 ? 'neg' : 'neu'}">${d.win_rate}%</div>
+        <div class="stat-sub">${d.wins}W / ${d.losses}L of ${d.total_trades}</div>
+      </div>
+      <div class="stat-box">
+        <div class="stat-label">Sharpe Ratio</div>
+        <div class="stat-val" style="color:${sharpeColor}">${d.sharpe}</div>
+        <div class="stat-sub">per-trade basis</div>
+      </div>
+      <div class="stat-box">
+        <div class="stat-label">Profit Factor</div>
+        <div class="stat-val ${d.profit_factor && d.profit_factor >= 1 ? 'pos' : 'neg'}">${d.profit_factor ?? '—'}</div>
+        <div class="stat-sub">${d.open_count} open now</div>
+      </div>
+    </div>
+    <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;padding:8px 12px;background:var(--bg);border-radius:6px;border:1px solid ${d.reset_count > 0 ? 'rgba(239,68,68,.3)' : 'var(--border)'}">
+      <span style="font-size:18px">${d.reset_count > 0 ? '🔄' : '✅'}</span>
+      <div>
+        <div style="font-size:13px;font-weight:700;color:${d.reset_count > 0 ? 'var(--red)' : 'var(--green)'}">
+          Auto-Reset: <span style="font-size:20px">${d.reset_count}</span> time${d.reset_count !== 1 ? 's' : ''}
+        </div>
+        <div style="font-size:10px;color:var(--muted)">
+          ${d.reset_count === 0 ? 'Account never wiped — still on original $100,000' : `Wiped to $0 and restarted ${d.reset_count}× since tracking began`}
+        </div>
+      </div>
+    </div>
+    <div class="tf-row" id="tf-${key}">
+      ${['1h','6h','24h','7d','all'].map((tf,i)=>
+        `<button class="tf-btn ${i===4?'active':''}" onclick="setTF('${key}','${tf}',this)">${tf}</button>`
+      ).join('')}
+    </div>
+    <div class="chart-wrap"><canvas id="chart-${key}"></canvas></div>
+  `;
+
+  const snaps = d.snapshots || [];
+  allSnaps[key] = snaps;
+  const chartLabel = isFlat ? 'Flat $1' : isSmart ? 'Smart Copy' : 'Proportional %';
+  const chartColor = isFlat ? 'rgb(99,102,241)' : isSmart ? 'rgb(34,197,94)' : 'rgb(245,158,11)';
+  buildChart(`chart-${key}`, filterSnaps(snaps, 'all'), chartLabel, chartColor);
+}
+
+function setTF(key, tf, btn) {
+  document.querySelectorAll(`#tf-${key} .tf-btn`).forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  const label = key === 'flat' ? 'Flat $1' : key === 'smart' ? 'Smart Copy' : 'Proportional %';
+  const color = key === 'flat' ? 'rgb(99,102,241)' : key === 'smart' ? 'rgb(34,197,94)' : 'rgb(245,158,11)';
+  buildChart(`chart-${key}`, filterSnaps(allSnaps[key], tf), label, color);
+}
+
+// ── Trade log ───────────────────────────────────────────────────────────────
+const STATUS_LABEL = {
+  won:          ['badge-won',   'Won'],
+  lost:         ['badge-lost',  'Lost'],
+  open:         ['badge-open',  'Open'],
+  exited_early: ['badge-early', 'Early Exit'],
+  stop_loss:    ['badge-stop',  'Stop Loss'],
+};
+
+function renderTrades(tab) {
+  if (!allData) return;
+  const tbody = document.getElementById('trade-tbody');
+
+  let rows = [];
+  for (const [key, d] of Object.entries(allData)) {
+    if (tab === 'flat'  && key !== 'flat')  continue;
+    if (tab === 'prop'  && key !== 'prop')  continue;
+    if (tab === 'smart' && key !== 'smart') continue;
+    for (const t of d.recent_trades || []) {
+      if (tab === 'open'   && t.status !== 'open') continue;
+      if (tab === 'closed' && t.status === 'open') continue;
+      rows.push({...t, _acct: key});
+    }
+  }
+  rows.sort((a,b) => (b.entry_ts||0) - (a.entry_ts||0));
+
+  if (!rows.length) {
+    tbody.innerHTML = '<tr class="empty-row"><td colspan="12">No trades yet — waiting for whale activity…</td></tr>';
+    return;
+  }
+
+  tbody.innerHTML = rows.slice(0,100).map(t => {
+    const [badgeCls, badgeLbl] = STATUS_LABEL[t.status] || ['badge-open','?'];
+    const pnl     = t.pnl ?? null;
+    const pnlStr  = pnl !== null ? (pnl >= 0 ? `+$${pnl.toFixed(4)}` : `-$${Math.abs(pnl).toFixed(4)}`) : '—';
+    const pnlCls  = pnl === null ? '' : pnl >= 0 ? 'pos' : 'neg';
+    const cur     = t.exit_price ?? t.cur_price ?? t.entry_price;
+    const priceMove = cur > t.entry_price ? 'pos' : cur < t.entry_price ? 'neg' : '';
+    const acctLbl = t._acct === 'flat'
+      ? '<span style="color:#818cf8">Flat</span>'
+      : t._acct === 'smart'
+      ? '<span style="color:var(--yellow)">Smart</span>'
+      : '<span style="color:var(--yellow)">Prop</span>';
+    const mkt = (t.market||'').length > 45 ? t.market.slice(0,45)+'…' : (t.market||'—');
+    const pct = t.whale_pct ? `<br><span style="color:var(--muted);font-size:9px">${t.whale_pct}% of whale</span>` : '';
+    const srcBadge = t.entry_type === 'pos_scan'
+      ? '<span style="background:rgba(34,197,94,.15);color:var(--green);padding:1px 6px;border-radius:4px;font-size:9px;font-weight:700">📍 SCAN</span>'
+      : '<span style="background:rgba(99,102,241,.1);color:#818cf8;padding:1px 6px;border-radius:4px;font-size:9px">NEW</span>';
+    return `<tr>
+      <td>${acctLbl}</td>
+      <td style="font-weight:600">#${t.whale_rank} ${t.whale}</td>
+      <td title="${t.market}" style="color:var(--muted)">${mkt}</td>
+      <td><span class="badge ${t.side==='BUY'?'badge-won':'badge-lost'}">${t.outcome||t.side}</span></td>
+      <td>$${t.entry_price?.toFixed(3)}</td>
+      <td class="${priceMove}">$${cur?.toFixed(3)}</td>
+      <td>$${t.amount_usdc?.toFixed(4)}${pct}</td>
+      <td class="${pnlCls}" style="font-weight:600">${pnlStr}</td>
+      <td><span class="badge ${badgeCls}">${badgeLbl}</span></td>
+      <td style="font-size:10px;color:var(--muted)">${t.follow_exit||'—'}</td>
+      <td>${t._acct === 'smart' ? srcBadge : ''}</td>
+      <td style="color:var(--muted)">${t.entry_dt||'—'}</td>
+    </tr>`;
+  }).join('');
+}
+
+function switchTab(tab, el) {
+  curTab = tab;
+  document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+  el.classList.add('active');
+  renderTrades(tab);
+}
+
+// ── Data fetch ──────────────────────────────────────────────────────────────
+function showToast(msg, ms=3000) {
+  const t = document.getElementById('toast');
+  t.textContent = msg; t.classList.add('show');
+  setTimeout(() => t.classList.remove('show'), ms);
+}
+
+async function loadData() {
+  try {
+    const d = await fetch('/api/demo').then(r => r.json());
+    allData = d;
+    renderCard('flat',  d.flat,  document.getElementById('card-flat'));
+    renderCard('prop',  d.prop,  document.getElementById('card-prop'));
+    renderCard('smart', d.smart, document.getElementById('card-smart'));
+    renderTrades(curTab);
+
+    // Update status
+    const st = await fetch('/api/status').then(r => r.json());
+    document.getElementById('status-dot').className = 'dot ' + (st.running ? 'running' : 'ok');
+    document.getElementById('status-txt').textContent = st.running
+      ? 'Updating…'
+      : (st.last_finished ? `Live · ${st.last_finished.replace('_',' ')}` : 'No data yet');
+  } catch(e) { console.error(e); }
+}
+
+// ── Init & auto-reload ──────────────────────────────────────────────────────
+loadData();
+setInterval(loadData, 30 * 1000);   // refresh every 30s
+</script>
+</body>
+</html>
