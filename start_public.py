@@ -5,7 +5,7 @@ Usage: python3 start_public.py
 """
 import subprocess, re, time, urllib.request, json, base64, sys, os
 
-GITHUB_TOKEN = "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"
+GITHUB_TOKEN = os.environ.get("GITHUB_TOKEN", "")
 GITHUB_USER  = "ffverysoon-eng"
 GITHUB_REPO  = "polymarket-whale-monitor"
 CLOUDFLARED  = os.path.expanduser("~/.local/bin/cloudflared")
