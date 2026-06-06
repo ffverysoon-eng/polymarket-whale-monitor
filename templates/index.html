@@ -1,0 +1,931 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Polymarket Whale Monitor</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --bg:      #0d0f14;
+      --surface: #161a24;
+      --border:  #252b3b;
+      --text:    #e2e8f0;
+      --muted:   #64748b;
+      --accent:  #6366f1;
+      --green:   #22c55e;
+      --red:     #ef4444;
+      --yellow:  #f59e0b;
+      --card:    #1a1f2e;
+    }
+    html, body { height: 100%; font-family: system-ui, sans-serif; background: var(--bg); color: var(--text); font-size: 14px; }
+
+    /* Layout */
+    .layout { display: grid; grid-template-columns: 200px 1fr 300px; grid-template-rows: 52px 1fr; height: 100vh; }
+    .topbar  { grid-column: 1/-1; display: flex; align-items: center; justify-content: space-between;
+               padding: 0 20px; background: var(--surface); border-bottom: 1px solid var(--border); }
+    .sidebar { grid-row: 2; padding: 14px 10px; border-right: 1px solid var(--border); overflow-y: auto; }
+    .main    { grid-row: 2; padding: 20px 24px; overflow-y: auto; }
+    .panel   { grid-row: 2; padding: 14px 12px; border-left: 1px solid var(--border); overflow-y: auto; }
+
+    /* Topbar */
+    .logo { font-weight: 700; font-size: 15px; }
+    .logo span { color: var(--accent); }
+    .topbar-right { display: flex; align-items: center; gap: 10px; }
+    #run-btn { padding: 6px 16px; border-radius: 6px; border: none; cursor: pointer;
+               background: var(--accent); color: #fff; font-weight: 600; font-size: 13px; }
+    #run-btn:disabled { opacity: .4; cursor: not-allowed; }
+    .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); flex-shrink: 0; }
+    .dot.running { background: var(--yellow); animation: pulse 1s infinite; }
+    .dot.ok  { background: var(--green); }
+    .dot.err { background: var(--red); }
+    @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.3} }
+
+    /* Sidebar */
+    .sidebar h3 { font-size: 11px; text-transform: uppercase; letter-spacing: .8px; color: var(--muted); margin-bottom: 8px; }
+    .report-link { display: block; padding: 7px 9px; border-radius: 5px; color: var(--text);
+                   text-decoration: none; font-size: 12px; margin-bottom: 3px; }
+    .report-link:hover  { background: var(--border); }
+    .report-link.active { background: var(--accent); color: #fff; }
+    .report-link small  { display: block; opacity: .6; font-size: 10px; }
+
+    /* Section headers */
+    .section { margin-bottom: 28px; }
+    .section-title { font-size: 13px; font-weight: 700; color: var(--text);
+                     border-bottom: 1px solid var(--border); padding-bottom: 6px; margin-bottom: 12px;
+                     display: flex; align-items: center; gap: 6px; }
+
+    /* Consensus / signal cards */
+    .cards { display: flex; flex-direction: column; gap: 8px; }
+    .card  { background: var(--card); border: 1px solid var(--border); border-radius: 8px; padding: 11px 14px; }
+    .card-top { display: flex; justify-content: space-between; align-items: flex-start; gap: 8px; margin-bottom: 6px; }
+    .card-market { font-size: 13px; font-weight: 500; line-height: 1.4; }
+    .badge { padding: 2px 8px; border-radius: 4px; font-weight: 700; font-size: 11px; flex-shrink: 0; }
+    .badge-yes  { background: rgba(34,197,94,.15); color: var(--green); }
+    .badge-no   { background: rgba(239,68,68,.15);  color: var(--red); }
+    .badge-high    { background: rgba(99,102,241,.2);  color: #818cf8; }
+    .badge-med     { background: rgba(245,158,11,.15); color: var(--yellow); }
+    .badge-low     { background: rgba(100,116,139,.15);color: var(--muted); }
+    .badge-skilled { background: rgba(34,197,94,.15);  color: var(--green); }
+    .badge-gambler { background: rgba(239,68,68,.15);  color: var(--red); }
+    .card-meta { font-size: 11px; color: var(--muted); }
+    .card-meta span { margin-right: 10px; }
+
+    /* Contradiction cards */
+    .contra-sides { display: flex; gap: 8px; margin-top: 6px; }
+    .contra-side  { flex: 1; background: var(--bg); border-radius: 5px; padding: 6px 8px; font-size: 11px; }
+    .contra-label { font-weight: 700; margin-bottom: 3px; }
+    .contra-whale { color: var(--muted); }
+
+    /* Top markets table */
+    .mkt-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+    .mkt-table th { color: var(--muted); text-align: left; padding: 4px 8px; font-weight: 500; border-bottom: 1px solid var(--border); }
+    .mkt-table td { padding: 7px 8px; border-bottom: 1px solid #1c2030; }
+    .mkt-table tr:last-child td { border-bottom: none; }
+    .bar-wrap { background: var(--border); border-radius: 3px; height: 4px; margin-top: 3px; width: 100%; }
+    .bar-fill { height: 4px; border-radius: 3px; background: var(--accent); }
+
+    /* Style table */
+    .style-row { display: flex; align-items: flex-start; gap: 10px; padding: 7px 0; border-bottom: 1px solid #1c2030; }
+    .style-rank { color: var(--muted); font-size: 11px; width: 20px; flex-shrink: 0; text-align: right; }
+    .style-name { font-weight: 600; font-size: 12px; }
+    .style-tag  { display: inline-block; font-size: 10px; padding: 1px 6px; border-radius: 10px;
+                  background: var(--border); color: var(--muted); margin: 2px 0; }
+    .style-note { font-size: 11px; color: var(--muted); margin-top: 1px; }
+
+    /* AI commentary box */
+    .ai-box { background: var(--card); border: 1px solid var(--accent); border-radius: 8px;
+              padding: 14px 16px; font-size: 13px; line-height: 1.7; color: #cbd5e1; margin-bottom: 24px; }
+    .ai-box h4 { font-size: 11px; text-transform: uppercase; letter-spacing: .8px; color: var(--accent); margin-bottom: 8px; }
+
+    /* Empty state */
+    .empty { display: flex; flex-direction: column; align-items: center; justify-content: center;
+             height: 70%; gap: 10px; color: var(--muted); text-align: center; }
+    .empty .icon { font-size: 40px; }
+
+    /* Right panel whale cards */
+    .whale-card { background: var(--card); border: 1px solid var(--border); border-radius: 8px;
+                  padding: 10px 12px; margin-bottom: 8px; }
+    .whale-card.shortlist { border-color: rgba(99,102,241,.35); }
+    .wc-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; }
+    .wc-name { font-weight: 600; font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 160px; }
+    .wc-rank { font-size: 10px; color: var(--muted); background: var(--border); padding: 1px 5px; border-radius: 8px; }
+    .wc-stats { display: grid; grid-template-columns: 1fr 1fr; gap: 5px; margin-bottom: 6px; }
+    .wc-stat  { background: var(--bg); border-radius: 4px; padding: 5px 7px; }
+    .wc-stat-l { font-size: 10px; color: var(--muted); }
+    .wc-stat-v { font-size: 12px; font-weight: 600; }
+    .pos  { color: var(--green); }
+    .neg  { color: var(--red); }
+    .wc-pos { font-size: 11px; }
+    .wc-pos-row { display: flex; justify-content: space-between; align-items: center;
+                  padding: 3px 0; border-top: 1px solid var(--border); }
+    .wc-mkt { color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 140px; }
+
+    /* Category analysis */
+    .cat-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 10px; margin-bottom: 4px; }
+    .cat-card { background: var(--card); border: 1px solid var(--border); border-radius: 8px; padding: 12px 14px; }
+    .cat-header { display: flex; align-items: center; gap: 7px; margin-bottom: 8px; }
+    .cat-emoji { font-size: 18px; }
+    .cat-name { font-weight: 700; font-size: 13px; }
+    .cat-capital { font-size: 11px; color: var(--green); font-weight: 600; }
+    .cat-meta { font-size: 10px; color: var(--muted); margin-bottom: 7px; }
+    .cat-whale-row { display: flex; justify-content: space-between; align-items: center;
+                     padding: 3px 0; border-top: 1px solid #1c2030; font-size: 11px; }
+    .cat-whale-name { color: var(--text); font-weight: 600; }
+    .cat-whale-cap  { color: var(--muted); }
+    .cat-badge { font-size: 9px; padding: 1px 5px; border-radius: 4px; font-weight: 700;
+                 background: rgba(99,102,241,.15); color: #818cf8; }
+    .pcat-tag { display: inline-block; font-size: 9px; padding: 1px 6px; border-radius: 8px;
+                font-weight: 700; background: rgba(99,102,241,.12); color: #818cf8; margin-left: 4px; }
+
+    /* Fund flow table */
+    .ff-table { width: 100%; border-collapse: collapse; font-size: 11px; }
+    .ff-table th { color: var(--muted); font-weight: 600; text-align: right; padding: 4px 8px; border-bottom: 1px solid var(--border); }
+    .ff-table th:first-child, .ff-table th:nth-child(2) { text-align: left; }
+    .ff-table td { padding: 5px 8px; border-bottom: 1px solid #1c2030; text-align: right; }
+    .ff-table td:first-child { text-align: left; color: var(--muted); font-weight: 500; }
+    .ff-table td:nth-child(2) { text-align: left; font-weight: 600; color: var(--text); }
+    .ff-table tr:hover td { background: rgba(255,255,255,.02); }
+    .roi-pill { display: inline-block; padding: 1px 6px; border-radius: 8px; font-weight: 700; font-size: 10px; }
+    .roi-high { background: rgba(34,197,94,.15); color: var(--green); }
+    .roi-mid  { background: rgba(245,158,11,.15); color: var(--yellow); }
+    .roi-low  { background: rgba(100,116,139,.15); color: var(--muted); }
+    .ff-note  { font-size: 10px; color: var(--muted); margin-top: 8px; font-style: italic; }
+
+    /* Herd / copy-trade detection */
+    .herd-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 4px; }
+    @media (max-width: 640px) { .herd-grid { grid-template-columns: 1fr; } }
+    .herd-card { background: var(--card); border: 1px solid var(--border); border-radius: 8px; padding: 11px 14px; }
+    .herd-card-title { font-size: 11px; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; margin-bottom: 8px; }
+    .herd-pair  { display: flex; align-items: flex-start; gap: 6px; padding: 5px 0; border-top: 1px solid var(--border); font-size: 11px; }
+    .herd-arrow { color: var(--muted); flex-shrink: 0; padding-top: 1px; }
+    .herd-pair-info { flex: 1; min-width: 0; }
+    .herd-names { font-weight: 600; color: var(--text); }
+    .herd-detail { color: var(--muted); font-size: 10px; margin-top: 1px; }
+    .badge-original   { background: rgba(34,197,94,.12);  color: var(--green); }
+    .badge-follower   { background: rgba(239,68,68,.12);  color: var(--red); }
+    .badge-mixed      { background: rgba(245,158,11,.12); color: var(--yellow); }
+    .badge-indep      { background: rgba(100,116,139,.12);color: var(--muted); }
+    .herd-type-row { display: flex; justify-content: space-between; align-items: center;
+                     padding: 4px 0; border-top: 1px solid var(--border); font-size: 11px; }
+
+    /* Loading */
+    #overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,.55);
+               align-items: center; justify-content: center; flex-direction: column; gap: 12px; z-index: 99; }
+    #overlay.show { display: flex; }
+    .spinner { width: 34px; height: 34px; border: 3px solid var(--border); border-top-color: var(--accent);
+               border-radius: 50%; animation: spin .8s linear infinite; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .loading-msg { color: var(--muted); font-size: 13px; }
+
+    /* Toast */
+    #toast { position: fixed; bottom: 20px; right: 20px; background: var(--surface);
+             border: 1px solid var(--border); padding: 9px 16px; border-radius: 7px;
+             font-size: 13px; opacity: 0; transition: opacity .25s; pointer-events: none; z-index: 999; }
+    #toast.show { opacity: 1; }
+
+    /* Exit behaviour table */
+    .exit-table { width:100%; border-collapse:collapse; font-size:11px; margin-top:6px; }
+    .exit-table th { color:var(--muted); text-align:left; padding:3px 6px; border-bottom:1px solid var(--border); font-weight:500; }
+    .exit-table td { padding:5px 6px; border-bottom:1px solid #1c2030; vertical-align:top; }
+    .exit-table tr:last-child td { border-bottom:none; }
+    .exit-early-profit { color:var(--yellow); }
+    .exit-early-stop   { color:#f87171; }
+    .exit-held-win     { color:var(--green); }
+    .exit-held-loss    { color:var(--muted); }
+    .verdict-chip { display:inline-block; padding:1px 6px; border-radius:8px; font-size:10px; font-weight:600; }
+    .verdict-ep  { background:rgba(245,158,11,.15); color:var(--yellow); }
+    .verdict-es  { background:rgba(239,68,68,.15);  color:#f87171; }
+    .verdict-hw  { background:rgba(34,197,94,.15);  color:var(--green); }
+    .verdict-hl  { background:rgba(100,116,139,.15);color:var(--muted); }
+    .exit-style-badge { font-size:10px; padding:2px 8px; border-radius:8px; font-weight:700; margin-left:6px; }
+    .es-ep  { background:rgba(245,158,11,.15); color:var(--yellow); }
+    .es-sl  { background:rgba(99,102,241,.15);  color:#818cf8; }
+    .es-dh  { background:rgba(34,197,94,.15);   color:var(--green); }
+    .es-mx  { background:rgba(100,116,139,.15); color:var(--muted); }
+
+    /* Live new bets */
+    #live-bets-section { margin-bottom: 24px; }
+    .live-badge { display: inline-flex; align-items: center; gap: 5px; font-size: 11px;
+                  background: rgba(239,68,68,.15); color: var(--red); padding: 2px 8px;
+                  border-radius: 10px; font-weight: 700; }
+    .live-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--red);
+                animation: pulse 1s infinite; }
+    .bet-row { display: flex; align-items: center; gap: 8px; padding: 8px 12px;
+               background: var(--card); border: 1px solid var(--border); border-radius: 7px;
+               margin-bottom: 6px; animation: fadeIn .4s ease; }
+    @keyframes fadeIn { from { opacity:0; transform:translateY(-4px); } to { opacity:1; transform:none; } }
+    .bet-whale { font-weight: 700; font-size: 12px; min-width: 90px; }
+    .bet-market { flex: 1; font-size: 12px; color: var(--muted); overflow: hidden;
+                  text-overflow: ellipsis; white-space: nowrap; }
+    .bet-amount { font-size: 12px; font-weight: 600; color: var(--green); min-width: 70px; text-align: right; }
+    .bet-price  { font-size: 11px; color: var(--muted); min-width: 50px; text-align: right; }
+    .next-refresh { font-size: 11px; color: var(--muted); margin-left: auto; }
+  </style>
+</head>
+<body>
+<div class="layout">
+
+  <!-- Topbar -->
+  <header class="topbar">
+    <div class="logo">🐳 Polymarket <span>Whale Monitor</span></div>
+    <div class="topbar-right">
+      <div id="status-dot" class="dot {% if job.running %}running{% elif job.error %}err{% elif job.last_finished %}ok{% endif %}"></div>
+      <span id="status-txt" style="color:var(--muted);font-size:12px">
+        {% if job.running %}Analyzing…{% elif job.error %}Error{% elif job.last_finished %}Ready{% else %}No data yet{% endif %}
+      </span>
+      <a href="/demo" style="padding:6px 14px;border-radius:6px;background:rgba(245,158,11,.15);color:var(--yellow);font-size:12px;font-weight:600;text-decoration:none">📈 Demo Portfolio</a>
+      <button id="run-btn" {% if job.running %}disabled{% endif %}>
+        {% if job.running %}Running…{% else %}▶ Run Analysis{% endif %}
+      </button>
+    </div>
+  </header>
+
+  <!-- Sidebar -->
+  <aside class="sidebar">
+    <h3>Reports</h3>
+    {% if reports %}
+      {% for r in reports %}
+        <a href="/report/{{ r.id }}" class="report-link {% if r.id == active_id %}active{% endif %}">
+          {{ r.label[:10] }}<small>{{ r.label[11:] }}</small>
+        </a>
+      {% endfor %}
+    {% else %}
+      <p style="color:var(--muted);font-size:12px">No reports yet.</p>
+    {% endif %}
+  </aside>
+
+  <!-- Main content -->
+  <main class="main">
+    {% if report %}
+
+      {# Live new bets section (populated via JS) #}
+      <div id="live-bets-section" style="display:none">
+        <div class="section-title">
+          <span class="live-badge"><span class="live-dot"></span> LIVE</span>
+          New Bets Since Last Run
+          <span class="next-refresh" id="next-refresh-txt"></span>
+        </div>
+        <div id="live-bets-list"></div>
+      </div>
+
+      {# AI commentary (shown only if Claude key is set) #}
+      {% if report.ai_commentary %}
+      <div class="ai-box">
+        <h4>🤖 Claude Commentary</h4>
+        {{ report.ai_commentary }}
+      </div>
+      {% endif %}
+
+      {# Investment Signals #}
+      {% if report.signals %}
+      <div class="section">
+        <div class="section-title">🎯 Investment Signals</div>
+        <div class="cards">
+          {% for s in report.signals %}
+          <div class="card">
+            <div class="card-top">
+              <span class="card-market">{{ s.market }}</span>
+              <span class="badge badge-{{ s.side | lower }}">{{ s.side }}</span>
+            </div>
+            <div class="card-meta">
+              <span class="badge badge-{{ s.confidence | lower }}">{{ s.confidence }} confidence</span>
+              <span style="margin-left:6px">{{ s.rationale }}</span>
+            </div>
+          </div>
+          {% endfor %}
+        </div>
+      </div>
+      {% endif %}
+
+      {# Consensus #}
+      {% if report.consensus %}
+      <div class="section">
+        <div class="section-title">📊 Whale Consensus <span style="color:var(--muted);font-weight:400;font-size:11px">(≥2 whales same side)</span></div>
+        <div class="cards">
+          {% for c in report.consensus[:6] %}
+          <div class="card">
+            <div class="card-top">
+              <span class="card-market">{{ c.market }}</span>
+              <span class="badge badge-{{ c.side | lower }}">{{ c.side }}</span>
+            </div>
+            <div class="card-meta">
+              <span>{{ c.whales | length }} whale{{ 's' if c.whales|length > 1 }}</span>
+              <span>${{ '{:,.0f}'.format(c.total_usdc) }} total</span>
+              <span>avg price {{ c.avg_price }}</span>
+            </div>
+            <div style="margin-top:5px;font-size:11px;color:var(--muted)">
+              {% for w in c.whales %}#{{ w.rank }} {{ w.name }}{% if not loop.last %}, {% endif %}{% endfor %}
+            </div>
+          </div>
+          {% endfor %}
+        </div>
+      </div>
+      {% endif %}
+
+      {# Contradictions #}
+      {% if report.contradictions %}
+      <div class="section">
+        <div class="section-title">⚡ Battleground Markets <span style="color:var(--muted);font-weight:400;font-size:11px">(whales on both sides)</span></div>
+        <div class="cards">
+          {% for c in report.contradictions[:5] %}
+          <div class="card">
+            <div class="card-top">
+              <span class="card-market">{{ c.market }}</span>
+              <span style="color:var(--muted);font-size:11px">${{ '{:,.0f}'.format(c.total_usdc) }}</span>
+            </div>
+            <div class="contra-sides">
+              <div class="contra-side">
+                <div class="contra-label" style="color:var(--green)">YES ({{ c.yes_whales|length }})</div>
+                {% for w in c.yes_whales %}<div class="contra-whale">#{{ w.rank }} {{ w.name }}</div>{% endfor %}
+              </div>
+              <div class="contra-side">
+                <div class="contra-label" style="color:var(--red)">NO ({{ c.no_whales|length }})</div>
+                {% for w in c.no_whales %}<div class="contra-whale">#{{ w.rank }} {{ w.name }}</div>{% endfor %}
+              </div>
+            </div>
+          </div>
+          {% endfor %}
+        </div>
+      </div>
+      {% endif %}
+
+      {# Exit Behaviour — who exits early vs holds to resolution #}
+      {% if profiles %}
+      <div class="section">
+        <div class="section-title">🚪 Exit Behaviour — Early vs Hold to Resolution</div>
+        <table class="exit-table">
+          <thead><tr>
+            <th>#</th><th>Whale</th><th>Exit Style</th>
+            <th style="text-align:center">Early%</th>
+            <th style="text-align:center">Early</th>
+            <th style="text-align:center">Holds</th>
+            <th>Recent Exit Details</th>
+          </tr></thead>
+          <tbody>
+          {% for p in profiles if p.rank <= 30 %}
+          {% set es = p.get('exit_style','') %}
+          {% if es and es != 'Insufficient data' %}
+          <tr>
+            <td style="color:var(--muted)">#{{ p.rank }}</td>
+            <td style="font-weight:600">{{ p.name }}</td>
+            <td>
+              {% if es == 'Early Profit Taker' %}<span class="exit-style-badge es-ep">{{ es }}</span>
+              {% elif es == 'Disciplined Stop Loss' %}<span class="exit-style-badge es-sl">{{ es }}</span>
+              {% elif es == 'Diamond Hands' %}<span class="exit-style-badge es-dh">{{ es }}</span>
+              {% else %}<span class="exit-style-badge es-mx">{{ es }}</span>{% endif %}
+            </td>
+            <td style="text-align:center;font-weight:600;
+              color:{% if p.get('early_exit_pct',0) >= 60 %}var(--yellow){% elif p.get('early_exit_pct',0) <= 25 %}var(--green){% else %}var(--muted){% endif %}">
+              {{ p.get('early_exit_pct',0) }}%
+            </td>
+            <td style="text-align:center;color:var(--yellow)">{{ p.get('early_exit_count',0) }}</td>
+            <td style="text-align:center;color:var(--green)">{{ p.get('hold_count',0) }}</td>
+            <td style="font-size:10px;color:var(--muted)">
+              {% for e in p.get('early_profit',[])[:2] %}
+                <span class="verdict-chip verdict-ep">↑ sold @{{ e.sell_price }} (left ${{ e.left_on_table }})</span>
+                <span style="color:#475569"> {{ e.market[:35] }}{% if e.market|length>35 %}…{% endif %} · resolved {{ e.end_date }}</span><br>
+              {% endfor %}
+              {% for e in p.get('early_stop',[])[:2] %}
+                <span class="verdict-chip verdict-es">↓ cut @{{ e.sell_price }} (saved ${{ e.saved }})</span>
+                <span style="color:#475569"> {{ e.market[:35] }}{% if e.market|length>35 %}…{% endif %} · resolved {{ e.end_date }}</span><br>
+              {% endfor %}
+              {% if not p.get('early_profit') and not p.get('early_stop') %}
+                <span style="color:#334155">—</span>
+              {% endif %}
+            </td>
+          </tr>
+          {% endif %}
+          {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      {% endif %}
+
+      {# Top markets by whale capital #}
+      {% if report.top_markets %}
+      <div class="section">
+        <div class="section-title">💰 Top Markets by Whale Capital</div>
+        {% set max_vol = report.top_markets[0].total_usdc %}
+        <table class="mkt-table">
+          <thead><tr>
+            <th>Market</th>
+            <th>Capital</th>
+            <th>Whales</th>
+            <th>YES/NO</th>
+          </tr></thead>
+          <tbody>
+          {% for m in report.top_markets %}
+          <tr>
+            <td>{{ m.market[:55] }}{% if m.market|length > 55 %}…{% endif %}
+              <div class="bar-wrap"><div class="bar-fill" style="width:{{ (m.total_usdc / max_vol * 100)|int }}%"></div></div>
+            </td>
+            <td>${{ '{:,.0f}'.format(m.total_usdc) }}</td>
+            <td>{{ m.whale_count }}</td>
+            <td>
+              <span style="color:var(--green)">{{ m.yes_count }}Y</span>
+              <span style="color:var(--muted)"> / </span>
+              <span style="color:var(--red)">{{ m.no_count }}N</span>
+            </td>
+          </tr>
+          {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      {% endif %}
+
+      {# Category Analysis #}
+      {% set ca = report.get('category_analysis', {}) %}
+      {% if ca.get('categories') %}
+      <div class="section">
+        <div class="section-title">📂 Category Focus — Where Whale Capital Is Deployed</div>
+        <div class="cat-grid">
+          {% for cat in ca.categories %}
+          <div class="cat-card">
+            <div class="cat-header">
+              <span class="cat-emoji">{{ cat.emoji }}</span>
+              <div>
+                <div class="cat-name">{{ cat.name }}</div>
+                <div class="cat-capital">${{ '{:,.0f}'.format(cat.total_capital) }} deployed</div>
+              </div>
+            </div>
+            <div class="cat-meta">
+              {{ cat.whale_count }} whale{{ 's' if cat.whale_count != 1 }} · {{ cat.dominant_exit }} style
+              {% if cat.trade_volume > 0 %} · ${{ '{:,.0f}'.format(cat.trade_volume) }} recent trades{% endif %}
+            </div>
+            {% for w in cat.top_whales %}
+            <div class="cat-whale-row">
+              <span class="cat-whale-name">#{{ w.rank }} {{ w.name }}</span>
+              <span class="cat-whale-cap">${{ '{:,.0f}'.format(w.capital) }}
+                {% if w.pnl > 0 %}<span style="color:var(--green)"> 30d+${{ '{:,.0f}'.format(w.pnl/1000) }}K</span>
+                {% elif w.pnl < 0 %}<span style="color:var(--red)"> 30d${{ '{:,.0f}'.format(w.pnl/1000) }}K</span>{% endif %}
+              </span>
+            </div>
+            {% endfor %}
+          </div>
+          {% endfor %}
+        </div>
+      </div>
+      {% endif %}
+
+      {# Fund Flow Analysis #}
+      {% set ff_whales = profiles | selectattr('rank', 'le', 30) | sort(attribute='rank') | list %}
+      {% if ff_whales %}
+      <div class="section">
+        <div class="section-title">💸 Fund Flow — Capital Deployed vs Pending Claims</div>
+        <div style="overflow-x:auto">
+        <table class="ff-table">
+          <thead>
+            <tr>
+              <th>#</th>
+              <th>Whale</th>
+              <th>Invested<br><span style="font-weight:400;font-size:9px">(visible positions)</span></th>
+              <th>Pending Claims<br><span style="font-weight:400;font-size:9px">(won, uncollected)</span></th>
+              <th>Open Value<br><span style="font-weight:400;font-size:9px">(active positions)</span></th>
+              <th>Total on PM<br><span style="font-weight:400;font-size:9px">(pending+open)</span></th>
+              <th>ROI×<br><span style="font-weight:400;font-size:9px">(claims÷invested)</span></th>
+              <th>30d P&L</th>
+              <th>Verify</th>
+            </tr>
+          </thead>
+          <tbody>
+          {% for p in ff_whales %}
+          {% set inv = p.get('all_invested', 0) %}
+          {% set pcl = p.get('pending_wins_usdc', 0) %}
+          {% set act = p.get('total_value', 0) %}
+          {% set tot = pcl + act %}
+          {% set roi = p.get('roi_multiplier') %}
+          {% set pnl = p.get('pnl_30d', 0) %}
+          <tr>
+            <td>{{ p.rank }}</td>
+            <td style="font-weight:600">{{ p.name }}</td>
+            <td>{% if inv > 0 %}${{ '{:,.0f}'.format(inv) }}{% else %}<span style="color:var(--muted)">—</span>{% endif %}</td>
+            <td class="pos">{% if pcl > 0 %}${{ '{:,.0f}'.format(pcl) }}{% else %}<span style="color:var(--muted)">—</span>{% endif %}</td>
+            <td>{% if act > 0 %}${{ '{:,.0f}'.format(act) }}{% else %}<span style="color:var(--muted)">—</span>{% endif %}</td>
+            <td class="pos" style="font-weight:700">{% if tot > 0 %}${{ '{:,.0f}'.format(tot) }}{% else %}<span style="color:var(--muted)">—</span>{% endif %}</td>
+            <td>
+              {% if roi is not none %}
+              <span class="roi-pill {% if roi >= 2.0 %}roi-high{% elif roi >= 1.0 %}roi-mid{% else %}roi-low{% endif %}">{{ roi }}×</span>
+              {% else %}<span style="color:var(--muted)">—</span>{% endif %}
+            </td>
+            <td class="{% if pnl >= 0 %}pos{% else %}neg{% endif %}">{% if pnl >= 0 %}+{% endif %}${{ '{:,.0f}'.format(pnl) }}</td>
+            <td style="white-space:nowrap">
+              <a href="https://intel.arkm.com/explorer/address/{{ p.address }}" target="_blank"
+                 style="font-size:9px;padding:2px 5px;border-radius:3px;background:rgba(59,130,246,.15);color:#60a5fa;text-decoration:none;font-weight:600;margin-right:3px">Arkham</a>
+              <a href="https://polymarket.com/profile/{{ p.address }}" target="_blank"
+                 style="font-size:9px;padding:2px 5px;border-radius:3px;background:rgba(99,102,241,.15);color:#818cf8;text-decoration:none;font-weight:600">PM</a>
+            </td>
+          </tr>
+          {% endfor %}
+          </tbody>
+        </table>
+        </div>
+        <div class="ff-note">⚠ Invested / Pending Claims / Open Value = positions visible in Polymarket API (active + unredeemed wins only). Lost bets and already-redeemed positions are pruned by Polymarket and cannot be retrieved — true capital deployed is higher. Click Arkham links to verify on-chain wallet history. ROI× = pending claims ÷ visible invested capital.</div>
+      </div>
+      {% endif %}
+
+      {# Herd / copy-trade detection #}
+      {% set cp = report.get('copy_analysis', {}) %}
+      {% if cp %}
+      <div class="section">
+        <div class="section-title">🔍 Herd Detection — Independent vs Copy Traders</div>
+        <div class="herd-grid">
+
+          {# Left: flagged follow pairs #}
+          <div class="herd-card">
+            <div class="herd-card-title">⚠️ Potential Follow-Trading Pairs <span style="font-weight:400;font-size:9px">(entered same side within 12 h)</span></div>
+            {% if cp.pairs %}
+              {% for pair in cp.pairs %}
+              <div class="herd-pair">
+                <div class="herd-arrow">→</div>
+                <div class="herd-pair-info">
+                  <div class="herd-names">
+                    <span style="color:var(--green)">#{{ pair.leader_rank }} {{ pair.leader }}</span>
+                    <span style="color:var(--muted)"> ▶ </span>
+                    <span style="color:var(--red)">#{{ pair.follower_rank }} {{ pair.follower }}</span>
+                  </div>
+                  <div class="herd-detail">{{ pair.instances }} shared entries · e.g. {{ pair.markets[0][:45] if pair.markets else '—' }}{% if pair.markets|length > 1 %}…{% endif %}</div>
+                </div>
+                <span class="badge badge-follower" style="font-size:9px;flex-shrink:0">{{ pair.instances }}×</span>
+              </div>
+              {% endfor %}
+            {% else %}
+              <div style="color:var(--muted);font-size:11px;padding-top:8px">No strong copy patterns detected in recent trades.</div>
+            {% endif %}
+          </div>
+
+          {# Right: whale independence classification #}
+          <div class="herd-card">
+            <div class="herd-card-title">🧭 Whale Independence Classification</div>
+            {% for wt in cp.whale_types %}
+            {% if loop.index <= 20 %}
+            <div class="herd-type-row">
+              <span style="color:var(--muted)">#{{ wt.rank }}</span>
+              <span style="flex:1;padding:0 8px;font-weight:600">{{ wt.name }}</span>
+              {% if wt.classification == 'original' %}
+              <span class="badge badge-original" style="font-size:9px">Original</span>
+              {% elif wt.classification == 'follower' %}
+              <span class="badge badge-follower" style="font-size:9px">Follower</span>
+              {% elif wt.classification == 'mixed' %}
+              <span class="badge badge-mixed" style="font-size:9px">Mixed</span>
+              {% else %}
+              <span class="badge badge-indep" style="font-size:9px">Indep</span>
+              {% endif %}
+              {% if wt.led_count > 0 %}
+              <span style="color:var(--green);font-size:10px;margin-left:5px">led {{ wt.led_count }}</span>
+              {% endif %}
+              {% if wt.followed_count > 0 %}
+              <span style="color:var(--red);font-size:10px;margin-left:5px">copied {{ wt.followed_count }}</span>
+              {% endif %}
+            </div>
+            {% endif %}
+            {% endfor %}
+          </div>
+
+        </div>
+      </div>
+      {% endif %}
+
+      {# Whale strategy profiles #}
+      {% if report.whale_styles %}
+      <div class="section">
+        <div class="section-title">🧠 Whale Strategy Profiles</div>
+        {% for w in report.whale_styles if w.rank <= 30 %}
+        <div class="style-row">
+          <div class="style-rank">#{{ w.rank }}</div>
+          <div style="flex:1">
+            <div style="display:flex;align-items:center;gap:5px;margin-bottom:2px">
+              <span class="style-name">{{ w.name }}</span>
+              {% if w.get('primary_category') and w.primary_category != '—' %}
+              <span class="pcat-tag">{{ w.primary_category }} {{ w.category_pct }}%</span>
+              {% endif %}
+              {% set es = w.get('exit_style','') %}
+              {% if es and es != 'Insufficient data' %}
+              <span class="exit-style-badge
+                {% if es == 'Early Profit Taker' %}es-ep
+                {% elif es == 'Diamond Hands' %}es-dh
+                {% elif es == 'Stop Loss Setter' %}es-sl
+                {% else %}es-mx{% endif %}" style="font-size:9px">{{ es }}</span>
+              {% endif %}
+              {% set ti = w.get('trader_independence', 'independent') %}
+              {% if ti == 'original' %}
+              <span class="badge badge-original" style="font-size:8px;padding:1px 5px">Original</span>
+              {% elif ti == 'follower' %}
+              <span class="badge badge-follower" style="font-size:8px;padding:1px 5px">Follower</span>
+              {% elif ti == 'mixed' %}
+              <span class="badge badge-mixed" style="font-size:8px;padding:1px 5px">Mixed</span>
+              {% endif %}
+            </div>
+            {% set lc = w.style %}
+            <span class="style-tag {% if lc == 'Skilled' %}pos{% elif lc == 'Gambler' %}neg{% endif %}"
+                  style="{% if lc == 'Skilled' %}background:rgba(34,197,94,.1);color:var(--green){% elif lc == 'Gambler' %}background:rgba(239,68,68,.1);color:var(--red){% elif lc == 'Value Bettor' %}background:rgba(34,197,94,.08);color:#86efac{% endif %}">
+              {{ lc }}
+            </span>
+            {% if w.get('resolved_count', 0) > 0 %}
+            <span style="font-size:10px;color:var(--muted);margin-left:6px">
+              {{ w.get('resolved_count') }} pending wins
+            </span>
+            {% endif %}
+            {% if w.get('category_breakdown') %}
+            <div style="font-size:10px;color:var(--muted);margin-top:2px">
+              {% for cat, pct in w.category_breakdown.items() %}{% if pct >= 10 %}{{ cat }} {{ pct }}%{% if not loop.last %} · {% endif %}{% endif %}{% endfor %}
+            </div>
+            {% endif %}
+            <div class="style-note">{{ w.notes }}</div>
+          </div>
+        </div>
+        {% endfor %}
+      </div>
+      {% endif %}
+
+    {% else %}
+      <div class="empty">
+        <div class="icon">📊</div>
+        <p style="font-size:13px;max-width:260px;line-height:1.6">
+          Click <strong>▶ Run Analysis</strong> to fetch live whale data.<br>
+          <span style="color:var(--muted);font-size:12px">No API key required.</span>
+        </p>
+      </div>
+    {% endif %}
+  </main>
+
+  <!-- Right panel: whale cards -->
+  <aside class="panel">
+    <h3 style="font-size:11px;text-transform:uppercase;letter-spacing:.8px;color:var(--muted);margin-bottom:10px">
+      Top Whales <span style="color:#818cf8">1–30</span>
+    </h3>
+    {% for p in profiles if p.rank <= 30 %}
+    <div class="whale-card shortlist">
+      <div class="wc-head">
+        <div style="overflow:hidden">
+          <span class="wc-name" title="{{ p.address }}">#{{ p.rank }} {{ p.name }}</span>
+        </div>
+        <div style="display:flex;gap:3px;flex-shrink:0">
+          {% if p.profit_rank %}<span class="wc-rank" style="background:rgba(34,197,94,.2);color:#22c55e" title="Profit rank">P#{{ p.profit_rank }}</span>{% endif %}
+          {% if p.volume_rank %}<span class="wc-rank" title="Volume rank">V#{{ p.volume_rank }}</span>{% endif %}
+        </div>
+      </div>
+      <div style="display:flex;gap:5px;margin-bottom:6px;flex-wrap:wrap">
+        <a href="https://polymarket.com/profile/{{ p.address }}" target="_blank"
+           style="font-size:9px;padding:2px 6px;border-radius:4px;background:rgba(99,102,241,.15);color:#818cf8;text-decoration:none;font-weight:600">
+          🟣 Polymarket
+        </a>
+        <a href="https://intel.arkm.com/explorer/address/{{ p.address }}" target="_blank"
+           style="font-size:9px;padding:2px 6px;border-radius:4px;background:rgba(59,130,246,.15);color:#60a5fa;text-decoration:none;font-weight:600">
+          🔷 Arkham
+        </a>
+        <span style="font-size:8px;color:var(--muted);font-family:monospace;padding-top:1px">{{ p.address[:10] }}…{{ p.address[-6:] }}</span>
+      </div>
+      <div class="wc-stats">
+        {% set pnl = p.get('pnl_30d', p.get('total_pnl', 0)) %}
+        {% set vol = p.get('volume_30d', p.get('volume_7d', 0)) %}
+        <div class="wc-stat">
+          <div class="wc-stat-l">30d P&L</div>
+          <div class="wc-stat-v {% if pnl >= 0 %}pos{% else %}neg{% endif %}">
+            {% if pnl >= 0 %}+{% endif %}${{ '{:,.0f}'.format(pnl) }}
+          </div>
+        </div>
+        {% set rc  = p.get('resolved_count', 0) %}
+        {% set pwu = p.get('pending_wins_usdc', 0) %}
+        {% set roi = p.get('roi_multiplier') %}
+        <div class="wc-stat">
+          <div class="wc-stat-l">Pending Wins <span style="color:var(--muted);font-size:9px">(unredeemed)</span></div>
+          {% if rc > 0 %}
+          <div class="wc-stat-v pos">{{ rc }} bets</div>
+          {% if pwu >= 1000 %}
+          <div class="wc-stat-sub" style="font-size:10px;color:var(--muted)">${{ '{:,.0f}'.format(pwu) }} unclaimed</div>
+          {% endif %}
+          {% else %}
+          <div class="wc-stat-v" style="color:var(--muted)">—</div>
+          {% endif %}
+        </div>
+        {% if roi is not none %}
+        <div class="wc-stat">
+          <div class="wc-stat-l">Capital ROI× <span style="color:var(--muted);font-size:9px">(claims÷invested)</span></div>
+          <div class="wc-stat-v {% if roi >= 2.0 %}pos{% elif roi >= 1.0 %}neu{% else %}neg{% endif %}">{{ roi }}×</div>
+          <div class="wc-stat-sub" style="font-size:10px;color:var(--muted)">${{ '{:,.0f}'.format(p.get('all_invested',0)) }} deployed</div>
+        </div>
+        {% endif %}
+        {% set sa = p.get('stake_avg', 0) %}
+        {% set sm = p.get('stake_max', 0) %}
+        {% set total_wealth = p.get('pending_wins_usdc', 0) + p.get('total_value', 0) %}
+        {% if total_wealth > 1000 %}
+        <div class="wc-stat" style="grid-column: 1 / -1; border-top: 1px solid var(--border); padding-top: 5px; margin-top: 2px;">
+          <div class="wc-stat-l">Total on Polymarket <span style="color:var(--muted);font-size:9px">(pending + open)</span></div>
+          <div class="wc-stat-v pos">${{ '{:,.0f}'.format(total_wealth) }}</div>
+        </div>
+        {% endif %}
+        {% if sa %}
+        <div class="wc-stat">
+          <div class="wc-stat-l">Avg 注碼</div>
+          <div class="wc-stat-v">${{ '{:,.0f}'.format(sa) }}</div>
+        </div>
+        <div class="wc-stat">
+          <div class="wc-stat-l">Max 注碼</div>
+          <div class="wc-stat-v">${{ '{:,.0f}'.format(sm) }}</div>
+        </div>
+        {% endif %}
+      </div>
+      {% set tt = p.get('trader_type', '') %}
+      {% set trend = p.get('stake_trend', '') %}
+      {% if tt %}
+      <div style="margin-bottom:5px;display:flex;align-items:center;gap:6px;flex-wrap:wrap">
+        <span class="badge
+          {% if tt in ('Disciplined Trader', 'High-Conviction Whale', 'Taking Profits') %}badge-yes
+          {% elif tt in ('Martingale Risk', 'Erratic / Emotional', 'Losing Edge') %}badge-no
+          {% elif tt == 'Pressing Winner' %}badge-med
+          {% else %}badge-med{% endif %}"
+          style="font-size:10px">{{ tt }}</span>
+        {% if trend and trend != 'unknown' %}
+        <span style="font-size:10px;color:
+          {% if trend == 'growing' %}#f59e0b
+          {% elif trend == 'stable' %}#22c55e
+          {% elif trend == 'shrinking' %}#94a3b8
+          {% else %}#ef4444{% endif %}">
+          注碼 {{ trend }}
+        </span>
+        {% endif %}
+      </div>
+      <div style="font-size:11px;color:var(--muted);margin-bottom:5px">{{ p.get('trader_desc','') }}</div>
+      {% set es = p.get('exit_style','') %}
+      {% if es and es != 'Insufficient data' %}
+      <div style="font-size:10px;margin-bottom:4px;display:flex;align-items:center;gap:5px">
+        <span class="exit-style-badge
+          {% if es == 'Early Profit Taker' %}es-ep
+          {% elif es == 'Disciplined Stop Loss' %}es-sl
+          {% elif es == 'Diamond Hands' %}es-dh
+          {% else %}es-mx{% endif %}">{{ es }}</span>
+        <span style="color:var(--muted)">{{ p.get('early_exit_pct',0) }}% early exits</span>
+      </div>
+      {% endif %}
+      {% set comp = p.get('pnl_composition', {}) %}
+      {% if comp and comp.get('realized_pct', 0) > 0 %}
+      <div style="font-size:11px;color:var(--muted)">
+        P&L: <span style="color:{% if comp.realized_sign == 'profit' %}var(--green){% else %}var(--red){% endif %}">{{ comp.realized_pct }}% realized</span>
+        · {{ comp.unrealized_pct }}% open
+      </div>
+      {% endif %}
+      {% set wf = report.get('category_analysis',{}).get('whale_focus',{}).get(p.name,{}) %}
+      {% if wf and wf.get('primary') and wf.primary != '—' %}
+      <div style="font-size:10px;color:var(--muted);margin-top:3px">
+        Focus: <span style="color:#818cf8;font-weight:600">{{ wf.primary }}</span>
+        <span style="color:var(--muted)"> {{ wf.pct }}%</span>
+        {% for cat, pct in wf.get('breakdown',{}).items() %}{% if cat != wf.primary and pct >= 15 %} · {{ cat }} {{ pct }}%{% endif %}{% endfor %}
+      </div>
+      {% endif %}
+      {% endif %}
+      <div class="wc-pos">
+        {% for pos in p.open_positions[:3] %}
+        <div class="wc-pos-row">
+          <span class="wc-mkt" title="{{ pos.market }}">{{ pos.market[:32] }}{% if pos.market|length > 32 %}…{% endif %}</span>
+          <span class="badge {% if pos.outcome|upper == 'YES' %}badge-yes{% else %}badge-no{% endif %}">
+            {{ pos.outcome|upper }}
+          </span>
+        </div>
+        {% endfor %}
+        {% if p.open_positions|length > 3 %}
+        <div style="color:var(--muted);font-size:10px;padding-top:3px">+{{ p.open_positions|length - 3 }} more</div>
+        {% endif %}
+      </div>
+    </div>
+    {% else %}
+      <p style="color:var(--muted);font-size:12px">Cards appear after first run.</p>
+    {% endfor %}
+  </aside>
+
+</div>
+
+<!-- Loading overlay -->
+<div id="overlay">
+  <div class="spinner"></div>
+  <div class="loading-msg">Fetching whale data… (~10 seconds)</div>
+</div>
+<div id="toast"></div>
+
+<script>
+  const runBtn   = document.getElementById('run-btn');
+  const dot      = document.getElementById('status-dot');
+  const txt      = document.getElementById('status-txt');
+  const overlay  = document.getElementById('overlay');
+  const toast    = document.getElementById('toast');
+  const liveSection = document.getElementById('live-bets-section');
+  const liveList    = document.getElementById('live-bets-list');
+  const nextRefTxt  = document.getElementById('next-refresh-txt');
+
+  const AUTO_REFRESH_MS = {{ (run_cooldown or 300) * 1000 }};  // ms between auto-runs
+  let poll = null;
+  let nextRunAt = null;
+  let countdownTimer = null;
+
+  function showToast(msg, ms=3000) {
+    toast.textContent = msg;
+    toast.classList.add('show');
+    setTimeout(() => toast.classList.remove('show'), ms);
+  }
+
+  function setRunning(yes) {
+    runBtn.disabled = yes;
+    runBtn.textContent = yes ? 'Running…' : '▶ Run Analysis';
+    dot.className = 'dot ' + (yes ? 'running' : '');
+    txt.textContent = yes ? 'Analyzing…' : 'Ready';
+    overlay.classList.toggle('show', yes);
+  }
+
+  // ── New bets rendering ──────────────────────────────────────────────────────
+  async function loadNewBets() {
+    try {
+      const bets = await fetch('/api/new-bets').then(r => r.json());
+      if (!bets.length) { liveSection.style.display = 'none'; return; }
+      liveSection.style.display = '';
+      const filtered = bets.filter(b => b.rank <= 30).slice(0, 20);
+      if (!filtered.length) { liveSection.style.display = 'none'; return; }
+      liveList.innerHTML = filtered.map(b => {
+        const side = b.side === 'BUY' ? 'YES' : 'NO';
+        const cls  = side === 'YES' ? 'badge-yes' : 'badge-no';
+        const ago  = b.timestamp ? timeAgo(b.timestamp) : '';
+        return `<div class="bet-row">
+          <span class="bet-whale">#${b.rank} ${b.whale}</span>
+          <span class="badge ${cls}">${side} ${b.outcome}</span>
+          <span class="bet-market" title="${b.market}">${b.market.length > 50 ? b.market.slice(0,50)+'…' : b.market}</span>
+          <span class="bet-amount">$${b.amount.toLocaleString(undefined,{maximumFractionDigits:0})}</span>
+          <span class="bet-price">@ ${b.price.toFixed(2)}</span>
+          <span style="font-size:10px;color:var(--muted);min-width:55px;text-align:right">${ago}</span>
+        </div>`;
+      }).join('');
+    } catch(e) { /* ignore */ }
+  }
+
+  function timeAgo(ts) {
+    const diff = Math.floor(Date.now()/1000 - ts);
+    if (diff < 60)   return diff + 's ago';
+    if (diff < 3600) return Math.floor(diff/60) + 'm ago';
+    return Math.floor(diff/3600) + 'h ago';
+  }
+
+  // ── Countdown to next auto-refresh ─────────────────────────────────────────
+  function scheduleNextRun(delayMs) {
+    nextRunAt = Date.now() + delayMs;
+    if (countdownTimer) clearInterval(countdownTimer);
+    countdownTimer = setInterval(() => {
+      const sec = Math.max(0, Math.round((nextRunAt - Date.now()) / 1000));
+      if (nextRefTxt) nextRefTxt.textContent = `next refresh in ${sec}s`;
+      if (sec === 0) { clearInterval(countdownTimer); triggerRun(true); }
+    }, 1000);
+  }
+
+  // ── Poll while running ──────────────────────────────────────────────────────
+  function startPoll(autoRun=false) {
+    if (poll) return;
+    poll = setInterval(async () => {
+      const r = await fetch('/api/status').then(r => r.json());
+      if (!r.running) {
+        clearInterval(poll); poll = null;
+        setRunning(false);
+        if (r.error) {
+          dot.className = 'dot err';
+          txt.textContent = 'Error';
+          showToast('❌ ' + r.error, 6000);
+        } else if (r.last_finished) {
+          dot.className = 'dot ok';
+          if (autoRun) {
+            // silent auto-refresh: reload page to show new data
+            location.href = '/report/' + r.last_finished;
+          } else {
+            showToast('✅ Done — loading report…');
+            setTimeout(() => location.href = '/report/' + r.last_finished, 700);
+          }
+        }
+        // Schedule next auto-refresh
+        scheduleNextRun(30 * 1000);
+        await loadNewBets();
+      }
+    }, 2000);
+  }
+
+  async function triggerRun(autoRun=false) {
+    const res = await fetch('/api/run', { method: 'POST' });
+    if (res.status === 409) { return; }  // already running, ignore silently
+    setRunning(true);
+    startPoll(autoRun);
+  }
+
+  runBtn.addEventListener('click', async () => {
+    const res = await fetch('/api/run', { method: 'POST' });
+    if (res.status === 409) { showToast('Already running…'); return; }
+    if (res.status === 429) {
+      const d = await res.json();
+      showToast(`⏳ Please wait ${d.wait_seconds}s before running again.`, 4000);
+      return;
+    }
+    setRunning(true);
+    startPoll(false);
+  });
+
+  // On page load: show existing new bets + schedule next auto-refresh
+  loadNewBets();
+  scheduleNextRun(30 * 1000);
+
+  {% if job.running %}setRunning(true); startPoll(false);{% endif %}
+</script>
+</body>
+</html>
